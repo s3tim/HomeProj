@@ -9,6 +9,7 @@ import pandas as pd
 from pathlib import Path
 import re
 from datetime import datetime
+import random
 
 bot = telebot.TeleBot("7970047574:AAEL7j4lsTYbRzE4dYa7YEm2LYSzZh2o-Pg")
 
@@ -26,7 +27,22 @@ Hi = [
     "верно?",
     "Напишите новое число",
     "На какую дату план?",
-    "Напишите дату выполнения задачи"
+    "Напишите дату выполнения задачи",
+    "Для того чтобы создать план напишите:\nПлан\n1. задача\n2. задача"
+]
+
+NoPlane = [
+    "Если твой план — ничего не делать, то у тебя идеальный шанс провести день идеально",
+    "Когда твой план — просто быть, весь день становится идеальным отпуском от суеты",
+    "План ничего — единственная стратегия, где перевыполнение гарантировано",
+    "Если твоя цель — ничего, то каждый шаг — это уже достижение",
+    "Хочешь быть продуктивным? Выполни план ничего — и ты уже молодец",
+    "Никаких тревог, дедлайнов и стресса. План ничего — лучший антистресс-менеджмент",
+    "План ничего — потому что иногда самая сложная работа — это отдыхать",
+    "Когда твой план — ничего, ты открываешь пространство для всего",
+    "Не делать — тоже действие. Не планировать — тоже план",
+    "План ничего — это искусство быть, а не казаться",
+    "Самый надежный план? Ничего не ждать — и тогда всё будет приятным бонусом"
 ]
 
 NFUC = ["NFUC","NFUC","NFUC","NFUC"]
@@ -35,12 +51,15 @@ NFUCs = [
     {"A": "NAME", "B": "SETINGS"}
 ]
 
-FILE_PATH = "NFU.ods"
+FILE_PATH = "NFUW.xlsx" 
 if Path(FILE_PATH).exists():
-    df = pd.read_excel(FILE_PATH, engine="odf")
+    df = pd.read_excel(FILE_PATH, engine="openpyxl")
     NFUCs = df.to_dict("records")  # Конвертируем DataFrame в список словарей
 else:
     print("Ошибка с таблицами")
+
+def get_random_message():
+    return random.choice(messages_list)
 
 def extract_date(text):
     """Извлекает первую найденную дату в формате DD.MM.YY или DD.MM.YYYY, анализируя только первые 3 слова"""
@@ -51,7 +70,9 @@ def extract_date(text):
             return word
     return None
 
-exclude_words = ["план", "plane", "/plane"]
+exclude_words = ["план", "plane", "/plane", "plane in", "plane for", "план на"]
+wor = ["на", "for", "in"]
+
 def format_text(text):
     # 1. Добавляем точки после цифр (если их нет)
     text = re.sub(r'(\d+)([^\d.])', r'\1.\2', text)
@@ -61,8 +82,8 @@ def format_text(text):
     text = re.sub(r'(\d+\.)\s*', r'\n\1 ', text)  # Перенос перед цифрами с точкой
     return text.strip()
 
-#На план
-@bot.message_handler(func=lambda message: (NFUC[0] in ["Button", "Text"]) and (any(keyword.lower() in message.text.lower() for keyword in ["план", "plane", "/plane"])))
+#На план            доделай новые проверки на то что есть ли текст и вот это все
+@bot.message_handler(func=lambda message: (NFUC[0] in ["Button", "Text"]) and (any(keyword.lower() in message.text.lower() for keyword in exclude_words)))
 def ide_plan1(message):
     user_id = message.from_user.id  #это id челла
     new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[1]}
@@ -74,39 +95,58 @@ def ide_plan1(message):
         types.InlineKeyboardButton("Нет", callback_data="IDE_P1_N")
     )
 
-    mtD = " ".join([word for word in message.text.split() 
+    mtD = " ".join([word for word in message.text.split()
                    if word.lower() not in [w.lower() for w in exclude_words]])
+
     formatted_text = format_text(mtD)
-    #mtD = formatted_text
     exdate = extract_date(message.text)
-    if exdate is not None:
-        mtD = mtD.replace(exdate, '').strip()
-        if mtD in ["на"]:
-            NFUC[1] = f"План на {exdate}\n{formatted_text}"
-            bot.send_message(message.chat.id, NFUC[1])
+    randomNo = random.choice(NoPlane)
+
+    if not formatted_text or formatted_text.isspace():
+        bot.send_message(message.chat.id, randomNo)
+        bot.send_message(message.chat.id, Hi[10])
+    else:
+        if exdate is not None:
+            termo = '|'.join(map(re.escape, exdate))
+            mtD = re.sub(termo, '', mtD).strip()
+            #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
+            user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
+            if not user_entry:  # Если пользователь НЕ найден
+                NFUCs.append(new_entry)
+                pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False)
+                print("Пользователь добавлен")
+            else:
+                print("Пользователь уже существует")
+            print(NFUCs)
+
+            if not mtD or mtD.isspace():
+                bot.send_message(message.chat.id, randomNo)
+                bot.send_message(message.chat.id, Hi[10])
+            else:
+                if mtD in wor:
+                    words = formatted_text.split()
+                    filtered_words = [word for word in words if word.lower() not in wor and word.lower() not in exdate]
+                    filtered_text = ' '.join(filtered_words)
+                    if not filtered_text or filtered_text.isspace() or not mtD or mtD.isspace():
+                        bot.send_message(message.chat.id, randomNo)
+                        bot.send_message(message.chat.id, Hi[10])
+                    else:
+                        NFUC[1] = f"План на {exdate}\n{filtered_text}"
+                        bot.send_message(message.chat.id, NFUC[1])
+                else:
+                    pattern = '|'.join(map(re.escape, wor))
+                    mtD = re.sub(pattern, '', mtD).strip()
+                    NFUC[1] = f"План на {exdate}\n{mtD}"
+                    bot.send_message(message.chat.id, NFUC[1])
         else:
-            mtD = mtD.replace("на", "").strip()
-            NFUC[1] = f"План на {exdate}\n{mtD}" if mtD else f"План на {exdate}"
-            bot.send_message(message.chat.id, NFUC[1])
-    else:
-        mts = " ".join([word for word in message.text.split() if word not in exclude_words])
-        formatted_text2 = format_text(mts)
-        NFUC[3] = formatted_text2
-        NFUC[1] = current_date
-        bot.send_message(message.chat.id, f"План на {current_date}?", reply_markup=markuP)
+            mts = " ".join([word for word in message.text.split() if word not in exclude_words])
+            formatted_text2 = format_text(mts)
+            NFUC[3] = formatted_text2
+            NFUC[1] = current_date
+            bot.send_message(message.chat.id, f"План на {current_date}?", reply_markup=markuP)
+        
 
-
-    # Ищем запись, где в столбце "A" (или другом) есть user_id ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
-    user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
-    if user_entry:
-        user_entry["B"] = NFUC[0]
-        user_entry["С"] = NFUC[1]
-    else:
-        NFUCs.append(new_entry)
-    pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="odf", index=False)
-    print(NFUCs)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("IDE_P1") )
+@bot.callback_query_handler(func=lambda call: call.data.startswith("IDE_P1"))
 def call_P1(call):
     if call.data == "IDE_P1_Y":
         NFUC[2] = "callback_PY"
@@ -118,9 +158,24 @@ def call_P1(call):
 
 @bot.message_handler(func=lambda message: NFUC[2] == "callback_PN")
 def CLN(message):
+    user_id = message.from_user.id  #это id челла
+    new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[1]}
     exdate = extract_date(message.text)
-    if exdate is not None:
-        bot.send_message(message.chat.id, f"План на {exdate}\n{NFUC[3]}")
+    randomNo = random.choice(NoPlane)
+
+    if not message.text or message.text.isspace():
+        bot.send_message(message.chat.id, randomNo)
+    else:
+        user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
+        if user_entry:
+            user_entry["B"] = NFUC[0]
+            user_entry["С"] = NFUC[1]
+        else:
+            NFUCs.append(new_entry)
+            pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="odf", index=False)
+            print(NFUCs)
+            NFUC[1] = f"План на {exdate}\n{NFUC[3]}"
+            bot.send_message(message.chat.id, NFUC[1])
 
 @bot.message_handler(func=lambda message: NFUC and NFUC[0] == "SETINGS" and any(keyword in message.text for keyword in ["Идея", "идея", "Idea", "idea"]))
 def ide_plan2(message):

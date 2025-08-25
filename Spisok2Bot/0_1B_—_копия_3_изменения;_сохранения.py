@@ -28,8 +28,7 @@ Hi = [
     "Напишите новое число",
     "На какую дату план?",
     "Напишите дату выполнения задачи",
-    "Для того чтобы создать план напишите:\nПлан\n1. задача\n2. задача",
-    "Напишите непрошедшую дату"
+    "Для того чтобы создать план напишите:\nПлан\n1. задача\n2. задача"
 ]
 
 NoPlane = [
@@ -46,23 +45,10 @@ NoPlane = [
     "Самый надежный план? Ничего не ждать — и тогда всё будет приятным бонусом"
 ]
 
-lastTime = [
-    "Если твой план на вчера — ничего, можешь не вносить его в список дел. Всё равно дедлайн уже провален. Или выполнен? 😉",
-    "Забыл внести 'ничего' в план на прошедший день? Не беда! Оно автоматически засчитывается как выполненное. ✅",
-    "Прошедший день без плана — это не пустота, а свобода. Не нужно ничего исправлять — просто прими это как опыт. 🌿",
-    "'Ничего' в календаре на вчера — значит, всё уже случилось так, как должно было. Никаких усилий, только принятие. ☯️",
-    "Если ты не запланировал ничего на день, который уже прошел — значит, ты интуитивно выбрал гармонию. Не нарушай её! 🕊️",
-    "Ты хотел ничего не делать в тот день? Поздравляю! Ты успешно выполнил план, даже не заметив. Всё идёт по графику! 🎯",
-    "Забыл добавить 'ничего' в план на прошлый вторник? Не переживай — оно там было по умолчанию. 😄",
-    "План на прошедшую дату — как прошлое: чем меньше в нём суеты, тем спокойнее настоящее. 📅",
-    "Вчерашний план — не провал. Это письмо самому себе из прошлого. Перечитай и реши: ответишь сегодня или отпустишь? ✉️",
-    "Запланировал на вчера? Отличная возможность сделать сегодня! ⚡"
-]
-
 NFUC = ["NFUC","NFUC","NFUC","NFUC"]
 
 NFUCs = [
-    {"A": "NAME", "B": "SETINGS", "C": "do_this"}
+    {"A": "NAME", "B": "SETINGS"}
 ]
 
 FILE_PATH = "NFUW.xlsx" 
@@ -75,45 +61,19 @@ else:
 def get_random_message():
     return random.choice(messages_list)
 
-def extract_dateA(text):
-    """Извлекает первую найденную дату из всего текста"""
-    # Ищем дату в любой части текста
-    date_match = re.search(r'\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})', text)
-    if date_match:
-        return date_match.group()
-    return None
-    
 def extract_date(text):
-    """Извлекает первую найденную дату в формате DD.MM.YY или DD.MM.YYYY, которая >= текущей даты"""
+    """Извлекает первую найденную дату в формате DD.MM.YY или DD.MM.YYYY, анализируя только первые 3 слова"""
     words = text.split()[:3]  # Получаем первые 3 слова
-    current_date = datetime.now()
-    
     for word in words:
-        # Добавлены границы слов \b
-        if re.fullmatch(r'\b\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})\b', word):
-            try:
-                # Преобразуем найденную дату в datetime объект
-                if len(word.split('.')[-1]) == 2:  # год из двух цифр
-                    text_date = datetime.strptime(word, '%d.%m.%y')
-                else:  # год из четырех цифр
-                    text_date = datetime.strptime(word, '%d.%m.%Y')
-                
-                # Сравниваем даты (игнорируем время, сравниваем только даты)
-                if text_date.date() >= current_date.date():
-                    return word
-                else:
-                    continue  # Продолжаем проверять другие слова
-                    
-            except ValueError:
-                # Если дата некорректна
-                continue
+        # Проверяем точное соответствие формату даты
+        if re.fullmatch(r'\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})', word):
+            return word
     return None
 
 exclude_words = ["план", "plane", "/plane", "plane in", "plane for", "план на"]
 wor = ["на", "for", "in"]
 
-specS = "!"                              #Это спецсимвол для обозначения того чем обозначаются задачи придумай как это занести в start
-pTT2 = fr'{specS}\s*([^\n{specS}]*?)(?=\s*{specS}|$)'
+import re
 
 def format_text(text):
     # Сохраняем оригинальный текст для даты
@@ -123,7 +83,7 @@ def format_text(text):
     text = ' '.join(text.split())
     
     # Ищем дату в тексте
-    date_pattern = r'\b\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})\b'
+    date_pattern = r'\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})'
     date_match = re.search(date_pattern, text)
     date_str = date_match.group() if date_match else ""
     
@@ -133,47 +93,57 @@ def format_text(text):
     
     # Ищем задачи в разных форматах
     pattern1 = r'(?<!\S)(\d+)[\.\)\*/][\s*]*([^\n]*?)(?=\s*(?:\d+[\.\)\*/][\s*]*|~|$))'
+    pattern2 = r'~\s*([^\n~]*?)(?=\s*~|$)'
     
-    # Парсим задачи
+    # Парсим задачи первого формата (нумерованные)
     tasks1 = re.findall(pattern1, text)
     numbered_tasks = [(num, task.strip()) for num, task in tasks1 if task.strip()]
     
-    tasks2 = re.findall(pTT2, text)
+    # Парсим задачи второго формата (с тильдой)
+    tasks2 = re.findall(pattern2, text)
     special_tasks = [task.strip() for task in tasks2 if task.strip()]
     
     # Форматируем результат
-    result = ""
-        # Добавляем заголовок с датой если она есть
     if date_str:
         result = f"План на {date_str}:\n"
-    
-    # Обрабатываем задачи
+    else:
+        result = date_str
+
+    # Обрабатываем нумерованные задачи
     if numbered_tasks:
+        # Исправляем нумерацию (на случай ошибок пользователя)
         corrected_tasks = []
         expected_number = 1
         
         for original_num, task in numbered_tasks:
             try:
                 current_num = int(original_num)
-                corrected_tasks.append((expected_number, task))
+                # Если номер не по порядку, исправляем его
+                if current_num != expected_number:
+                    corrected_tasks.append((expected_number, task))
+                else:
+                    corrected_tasks.append((current_num, task))
                 expected_number += 1
             except ValueError:
+                # Если номер не число, используем ожидаемый номер
                 corrected_tasks.append((expected_number, task))
                 expected_number += 1
         
         for number, task in corrected_tasks:
             result += f"{number}) {task}\n"
     
+    # Обрабатываем задачи с тильдой (нумеруем с 1)
     elif special_tasks:
         for i, task in enumerate(special_tasks, 1):
             result += f"{i}) {task}\n"
     
+    # Если задачи не найдены, возвращаем оригинальный текст с очисткой
     else:
-        return None  # Если задач нет
+        result = original_text.strip()
     
     return result
 
-#На план
+#На план            доделай новые проверки на то что есть ли текст и вот это все
 @bot.message_handler(func=lambda message: (NFUC[0] in ["Button", "Text"]) and (any(keyword.lower() in message.text.lower() for keyword in exclude_words)))
 def ide_plan1(message):
     user_id = message.from_user.id  #это id челла
@@ -199,11 +169,8 @@ def ide_plan1(message):
         bot.send_message(message.chat.id, Hi[10])
     else:
         if exdate is not None:
-            if exdate:  # Проверяем, что exdate не None и не пустая строка
-                termo = re.escape(exdate)
-                mtD = re.sub(termo, '', mtD).strip()
-            else:
-                mtD = mtD.strip()
+            termo = '|'.join(map(re.escape, exdate))
+            mtD = re.sub(termo, '', mtD).strip()
             if not mtD or mtD.isspace():
                 bot.send_message(message.chat.id, randomNo)
                 bot.send_message(message.chat.id, Hi[10])
@@ -213,8 +180,8 @@ def ide_plan1(message):
                         bot.send_message(message.chat.id, randomNo)
                         bot.send_message(message.chat.id, Hi[10])
                     else:
-                        NFUC[3] = formatted_text
-                        bot.send_message(message.chat.id, NFUC[3])
+                        NFUC[1] = f"{formatted_text}"
+                        bot.send_message(message.chat.id, NFUC[1])
                         #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
                         user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
                         if not user_entry:
@@ -241,13 +208,8 @@ def ide_plan1(message):
         else:
             NFUC[3] = formatted_text
             NFUC[1] = current_date
-            EXNF = extract_dateA(NFUC[3])
-            if EXNF and EXNF in NFUC[3]:
-                # Если дата найдена и присутствует в тексте
-                bot.send_message(message.chat.id, NFUC[3])
-            else:
-                # Если даты нет
-                bot.send_message(message.chat.id, f"План на {NFUC[1]}?", reply_markup=markuP)
+            bot.send_message(message.chat.id, f"План на {NFUC[1]}?", reply_markup=markuP)
+        
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("IDE_P1"))
 def call_P1(call):
@@ -266,7 +228,6 @@ def CLN(message):
     new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[3]}
     exdate = extract_date(message.text)
     randomNo = random.choice(NoPlane)
-    randomTime = random.choice(lastTime)
 
     if not message.text or message.text.isspace():
         bot.send_message(message.chat.id, randomNo)
@@ -293,10 +254,6 @@ def CLN(message):
                 NFUC[3] = user_entry[next_plan_col]
                 bot.send_message(message.chat.id, NFUC[3])
             print(NFUCs)
-        else:
-            exdate = "None"
-            bot.send_message(message.chat.id, randomTime)
-            bot.send_message(message.chat.id, Hi[11])
 
 @bot.message_handler(func=lambda message: NFUC and NFUC[0] == "SETINGS" and any(keyword in message.text for keyword in ["Идея", "идея", "Idea", "idea"]))
 def ide_plan2(message):
@@ -316,8 +273,6 @@ def callback_text(call):
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    global specS
-    specS = "!" 
     user_id = message.from_user.id 
     # Ищем запись, где в столбце "A" (или другом) есть user_id
     user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
