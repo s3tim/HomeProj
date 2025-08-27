@@ -1,8 +1,6 @@
 import telebot
 from telebot import TeleBot, types
 import time
-from openpyxl import Workbook, load_workbook
-import time
 import threading
 from queue import Queue
 import pandas as pd
@@ -18,9 +16,9 @@ SOS = ["SOS", "TaskState"]  # Изначально в главном меню
 
 #Для всех слов бота
 Hi = [
-    "Привет! Я умный помощник...\nВыбери режим",
-    "Кнопки",
-    "Текст",
+    "Привет! Я умный помощник...\nВыбери действие",
+    "Изменить символ для создание задачи",
+    "Выбрать язык",
     "Режим выбран ✅",
     "Хорошо, теперь выбери количество\nЕсли твоих задачь больше, просто напиши их количество в чат",
     "Теперь отправь свои задачи",
@@ -30,6 +28,14 @@ Hi = [
     "Напишите дату выполнения задачи",
     "Для того чтобы создать план напишите:\nПлан\n1. задача\n2. задача",
     "Напишите непрошедшую дату"
+]
+
+HiR = [
+    "Привет! Я умный помощник...\nВыбери действие"
+]
+
+HiE = [
+    "Hi! I`m is smart assistant"
 ]
 
 NoPlane = [
@@ -59,18 +65,38 @@ lastTime = [
     "Запланировал на вчера? Отличная возможность сделать сегодня! ⚡"
 ]
 
-NFUC = ["NFUC","NFUC","NFUC","NFUC"]
+NFUC = ["NAME","SETINGS","language","Do_this"]
+trigs = ["trigs","trigs","dop"]
 
 NFUCs = [
-    {"A": "NAME", "B": "SETINGS", "C": "do_this"}
+    {"A": "NAME", "B": "SETINGS", "C": "language", "D": "Do_this"}
 ]
 
-FILE_PATH = "NFUW.xlsx" 
+#СДЕЛАТЬ ПРОВЕРКУ через ТАБЛИЦУ для ВСЕХ АКТИВНЫХ ПЕРЕМЕНННЫХ 
+
+FILE_PATH = "NFUW.ods"  # Изменено на ODS
 if Path(FILE_PATH).exists():
-    df = pd.read_excel(FILE_PATH, engine="openpyxl")
-    NFUCs = df.to_dict("records")  # Конвертируем DataFrame в список словарей
+    try:
+        df = pd.read_excel(FILE_PATH, engine="odf")  # Изменен движок на odf
+        NFUCs = df.to_dict("records")  # Конвертируем DataFrame в список словарей
+    except Exception as e:
+        print(f"Ошибка при чтении ODS файла: {e}")
+        NFUCs = [{"A": "NAME", "B": "SETINGS", "C": "language", "D": "Do_this"}]
 else:
-    print("Ошибка с таблицами")
+    print("Файл ODS не существует, создаем новую структуру")
+    # Создаем новый ODS файл при первом запуске
+    df = pd.DataFrame(NFUCs)
+    df.to_excel(FILE_PATH, engine="odf", index=False)
+
+def save_to_ods(data):
+    """Сохраняет данные в ODS файл"""
+    try:
+        df = pd.DataFrame(data)
+        df.to_excel(FILE_PATH, engine="odf", index=False)
+        return True
+    except Exception as e:
+        print(f"Ошибка при сохранении ODS: {e}")
+        return False
 
 def get_random_message():
     return random.choice(messages_list)
@@ -113,8 +139,12 @@ exclude_words = ["план", "plane", "/plane", "plane in", "plane for", "пла
 wor = ["на", "for", "in"]
 
 specS = "!"                              #Это спецсимвол для обозначения того чем обозначаются задачи придумай как это занести в start
+language = "L_English"
 
 def format_text(text):
+    # Сохраняем оригинальный текст для даты
+    original_text = text
+    
     # Убираем лишние пробелы
     text = ' '.join(text.split())
     
@@ -123,36 +153,58 @@ def format_text(text):
     date_match = re.search(date_pattern, text)
     date_str = date_match.group() if date_match else ""
     
-    # Удаляем "план на" и дату если они есть вместе
+    # Удаляем дату из текста для обработки задач
     if date_str:
-        # Удаляем фразы типа "план на 25.05.25"
-        text = re.sub(rf'\bплан\s*на\s*{re.escape(date_str)}\b', '', text, flags=re.IGNORECASE)
-    else:
-        # Удаляем просто слово "план"
-        text = re.sub(r'\bплан\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(re.escape(date_str), '', text)
     
-    # Очищаем текст
-    text = ' '.join(text.split())
+    # Ищем задачи в разных форматах
+    pattern1 = r'(?<!\S)(\d+)[\.\)\*/][\s*]*([^\n]*?)(?=\s*(?:\d+[\.\)\*/][\s*]*|~|$))'
+    pTT2 = fr'{specS}\s*([^\n{specS}]*?)(?=\s*{specS}|$)'
+
+    # Парсим задачи
+    tasks1 = re.findall(pattern1, text)
+    numbered_tasks = [(num, task.strip()) for num, task in tasks1 if task.strip()]
     
-    # Ищем задачи с !
-    tasks = re.findall(fr'{re.escape(specS)}\s*([^{re.escape(specS)}]+)', text)
-    tasks = [task.strip() for task in tasks if task.strip()]
+    tasks2 = re.findall(pTT2, text)
+    special_tasks = [task.strip() for task in tasks2 if task.strip()]
     
     # Форматируем результат
-    result = f"План на {date_str}:\n" if date_str else "План:\n"
+    result = ""
+        # Добавляем заголовок с датой если она есть
+    if date_str:
+        result = f"План на {date_str}:\n"
     
-    if tasks:
-        for i, task in enumerate(tasks, 1):
+    # Обрабатываем задачи
+    if numbered_tasks:
+        corrected_tasks = []
+        expected_number = 1
+        
+        for original_num, task in numbered_tasks:
+            try:
+                current_num = int(original_num)
+                corrected_tasks.append((expected_number, task))
+                expected_number += 1
+            except ValueError:
+                corrected_tasks.append((expected_number, task))
+                expected_number += 1
+        
+        for number, task in corrected_tasks:
+            result += f"{number}) {task}\n"
+    
+    elif special_tasks:
+        for i, task in enumerate(special_tasks, 1):
             result += f"{i}) {task}\n"
-        return result
+    
     else:
-        return None
+        return None  # Если задач нет
+    
+    return result
 
 #На план
-@bot.message_handler(func=lambda message: (NFUC[0] in ["Button", "Text"]) and (any(keyword.lower() in message.text.lower() for keyword in exclude_words)))
+@bot.message_handler(func=lambda message: (trigs[0] in ["TRIGER"]) or (any(keyword.lower() in message.text.lower() for keyword in exclude_words)))
 def ide_plan1(message):
-    user_id = message.from_user.id  #это id челла
-    new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[3]}
+    user_id = message.from_user.id      #это id челла
+    new_entry = {"A": user_id, "B": NFUC[0], "C": language, "D": NFUC[3]}
     user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
     current_date = datetime.now().strftime("%d.%m.%Y")
 
@@ -190,11 +242,11 @@ def ide_plan1(message):
                     else:
                         NFUC[3] = formatted_text
                         bot.send_message(message.chat.id, NFUC[3])
-                        #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
+                        #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ ODS
                         user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
                         if not user_entry:
                             NFUCs.append(new_entry)
-                            pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False) 
+                            save_to_ods(NFUCs)  # Используем новую функцию сохранения
                         else:
                             plan_columns = [col for col in user_entry.keys() if col not in ['A', 'B'] and str(col).isdigit()]
                             if plan_columns:
@@ -205,65 +257,72 @@ def ide_plan1(message):
                                 next_plan_col = "2"
                             user_entry[next_plan_col] = f"План на {exdate}:\n{NFUC[3]}"
                             user_entry["B"] = NFUC[0]
-                            user_entry["C"] = NFUC[3]
-                        pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False)
+                            user_entry["D"] = NFUC[3]
+                            save_to_ods(NFUCs)  # Используем новую функцию сохранения
                     print(NFUCs)
                 else:
+                    user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
+                    if not user_entry:
+                        NFUCs.append(new_entry)
+                        save_to_ods(NFUCs)  # Используем новую функцию сохранения
+                    else:
+                        plan_columns = [col for col in user_entry.keys() if col not in ['A', 'B'] and str(col).isdigit()]
+                        if plan_columns:
+                            #Находим максимальный номер столбца с планами
+                            max_plan_col = max(int(col) for col in plan_columns)
+                            next_plan_col = str(max_plan_col + 1)
+                        else:
+                            next_plan_col = "2"
+                        user_entry[next_plan_col] = f"План на {exdate}:\n{NFUC[3]}"
+                        user_entry["B"] = NFUC[0]
+                        user_entry["D"] = NFUC[3]
+                        save_to_ods(NFUCs)  # Используем новую функцию сохранения
+                    print(NFUCs)
                     pattern = '|'.join(map(re.escape, wor))
                     mtD = re.sub(pattern, '', mtD).strip()
-                    NFUC[1] = f"План на {exdate}:\n{mtD}"
-                    bot.edit_message_text(NFUC[1], chat_id=message.chat.id, message_id=message.message_id)
+                    NFUC[3] = f"План на {exdate}:\n{mtD}"
+                    bot.edit_message_text(NFUC[3], chat_id=message.chat.id, message_id=message.message_id)
         else:
             NFUC[3] = formatted_text
-            NFUC[1] = current_date
             EXNF = extract_dateA(NFUC[3])
             if EXNF and EXNF in NFUC[3]:
                 # Если дата найдена и присутствует в тексте
                 bot.send_message(message.chat.id, NFUC[3])
+                #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ ODS
+                user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
+                if not user_entry:
+                    NFUCs.append(new_entry)
+                    save_to_ods(NFUCs)  # Используем новую функцию сохранения
+                else:
+                    plan_columns = [col for col in user_entry.keys() if col not in ['A', 'B'] and str(col).isdigit()]
+                    if plan_columns:
+                        #Находим максимальный номер столбца с планами
+                        max_plan_col = max(int(col) for col in plan_columns)
+                        next_plan_col = str(max_plan_col + 1)
+                    else:
+                        next_plan_col = "2"
+                    user_entry[next_plan_col] = f"План на {exdate}:\n{NFUC[3]}"
+                    user_entry["B"] = NFUC[0]
+                    user_entry["D"] = NFUC[3]
+                    save_to_ods(NFUCs)  # Используем новую функцию сохранения
+                print(NFUCs)
             else:
                 # Если даты нет
-                bot.send_message(message.chat.id, f"План на {NFUC[1]}?", reply_markup=markuP)
+                bot.send_message(message.chat.id, f"План на {NFUC[0]}?", reply_markup=markuP)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("IDE_P1"))
 def call_P1(call):
     if call.data == "IDE_P1_Y":
-        NFUC[2] = "callback_PY"
-        NFUC[1] = f"План на {NFUC[1]}:\n{NFUC[3]}"
+        trigs[0] = "IDE_P1_Y"
+        NFUC[3] = f"План на {NFUC[3]}:\n{NFUC[3]}"
+        
+        bot.edit_message_text(NFUC[3], chat_id=call.message.chat.id, message_id=call.message.message_id)
     if call.data == "IDE_P1_N":
-        NFUC[2] = "callback_PN"
+        trigs[0] = "IDE_P1_N"
         bot.send_message(call.message.chat.id, Hi[9])
     button(call.message)
 
-@bot.message_handler(func=lambda message: NFUC[2] == "callback_PY")
-def CLY(message):
-    user_id = message.from_user.id  #это id челла
-    new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[1]}
-    formatted_text = format_text(NFUC[1])
-    NFUC[1] = formatted_text
-    bot.edit_message_text(NFUC[1], chat_id=message.chat.id, message_id=message.message_id)
-
-    #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
-    user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
-    if not user_entry:
-        NFUCs.append(new_entry)
-        pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False) 
-    else:
-        plan_columns = [col for col in user_entry.keys() if col not in ['A', 'B'] and str(col).isdigit()]
-        if plan_columns:
-            #Находим максимальный номер столбца с планами
-            max_plan_col = max(int(col) for col in plan_columns)
-            next_plan_col = str(max_plan_col + 1)
-        else:
-            next_plan_col = "2"
-        user_entry[next_plan_col] = f"План на {exdate}:\n{NFUC[3]}"
-        user_entry["B"] = NFUC[0]
-        user_entry["C"] = NFUC[1]
-        pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False)
-        NFUC[3] = user_entry[next_plan_col]
-        bot.send_message(message.chat.id, NFUC[3])
-    print(NFUCs)
-
-@bot.message_handler(func=lambda message: NFUC[2] == "callback_PN")
+@bot.message_handler(func=lambda message: trigs[0] == "IDE_P1_N")
 def CLN(message):
     user_id = message.from_user.id  #это id челла
     new_entry = {"A": user_id, "B": NFUC[0], "C": NFUC[3]}
@@ -276,11 +335,11 @@ def CLN(message):
         bot.send_message(message.chat.id, Hi[10])
     else:
         if exdate:
-            #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ
+            #ЭТО ДЛЯ СОХРАНЕНИЯ В ТАБЛИЦУ ODS
             user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
             if not user_entry:
                 NFUCs.append(new_entry)
-                pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False) 
+                save_to_ods(NFUCs)  # Используем новую функцию сохранения
             else:
                 plan_columns = [col for col in user_entry.keys() if col not in ['A', 'B'] and str(col).isdigit()]
                 if plan_columns:
@@ -292,7 +351,7 @@ def CLN(message):
                 user_entry[next_plan_col] = f"План на {exdate}:\n{NFUC[3]}"
                 user_entry["B"] = NFUC[0]
                 user_entry["C"] = NFUC[1]
-                pd.DataFrame(NFUCs).to_excel(FILE_PATH, engine="openpyxl", index=False)
+                save_to_ods(NFUCs)  # Используем новую функцию сохранения
                 NFUC[3] = user_entry[next_plan_col]
                 bot.send_message(message.chat.id, NFUC[3])
             print(NFUCs)
@@ -301,41 +360,57 @@ def CLN(message):
             bot.send_message(message.chat.id, randomTime)
             bot.send_message(message.chat.id, Hi[11])
 
-@bot.message_handler(func=lambda message: NFUC and NFUC[0] == "SETINGS" and any(keyword in message.text for keyword in ["Идея", "идея", "Idea", "idea"]))
+"""""@bot.message_handler(func=lambda message: NFUC and NFUC[0] == "SETINGS" and any(keyword in message.text for keyword in ["Идея", "идея", "Idea", "idea"]))
 def ide_plan2(message):
-    bot.send_message(message.chat.id, "SAE2")
+    bot.send_message(message.chat.id, "SAE2")"""""
 
-@bot.callback_query_handler(func=lambda call: call.data == "edit_text1" )
+@bot.message_handler(commands=["start"])
+def start(message):
+    global NFUCs, specS, language
+    SOS[0] = "SOS"  # Сбрасываем состояние
+    user_id = message.from_user.id  #это id челла
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton(Hi[1], callback_data="edit_specS"),
+        types.InlineKeyboardButton(Hi[2], callback_data="edit_language")
+    )
+    # Ищем запись в таблице, где в столбце "A" есть user_id
+    searchA = any(entry.get("A") == user_id for entry in NFUCs)
+    if not searchA:
+        bot.send_message(message.chat.id, text = f"{HiE[0]}\n{HiR[0]}", reply_markup=markup)
+    else:
+        if language == "L_English":
+            bot.send_message(message.chat.id, HiE[0], reply_markup=markup)
+        elif language == "L_Russia":
+            bot.send_message(message.chat.id, HiR[0], reply_markup=markup)
+    
+    global specS  
+    specS = "!" #ВЫВЕСТИ ЭТО ОТДЕЛЬНО
+    # Загружаем данные из ODS при каждом старте
+    if Path(FILE_PATH).exists():
+        try:
+            df = pd.read_excel(FILE_PATH, engine="odf")
+            NFUCs = df.to_dict("records")
+        except Exception as e:
+            print(f"Ошибка при чтении ODS файла: {e}")
+    
+    # Ищем запись, где в столбце "A" (или другом) есть user_id
+    user_A = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
+    if user_A:
+        NFUC[0] = user_A["B"]
+        NFUC[1] = user_A["C"]
+        print(NFUC)
+
+@bot.callback_query_handler(func=lambda call: call.data == "edit_specS")
 def callback_buttons(call):
     SOS[0] = "edit_text1"  # Изменяем первый элемент списка
     bot.edit_message_text(Hi[3], chat_id=call.message.chat.id, message_id=call.message.message_id)
     button(call.message)  # Переходим в режим кнопок
 
-@bot.callback_query_handler(func=lambda call: call.data == "edit_text2")
+@bot.callback_query_handler(func=lambda call: call.data == "edit_language")
 def callback_text(call):
-    SOS[0] = "edit_text2"  # Изменяем первый элемент списка
+    #if mess
     bot.edit_message_text(Hi[3], chat_id=call.message.chat.id, message_id=call.message.message_id)
-    text(call.message)  # Переходим в текстовый режим
-
-@bot.message_handler(commands=["start"])
-def start(message):
-    global specS
-    specS = "!" 
-    user_id = message.from_user.id 
-    # Ищем запись, где в столбце "A" (или другом) есть user_id
-    user_entry = next((entry for entry in NFUCs if entry.get("A") == user_id), None)
-    if user_entry:
-        NFUC[0] = user_entry["B"]
-
-    SOS[0] = "SOS"  # Сбрасываем состояние
-    user_id = message.from_user.id  #это id челла
-
-    markup = types.InlineKeyboardMarkup()
-    markup.row(
-        types.InlineKeyboardButton(Hi[1], callback_data="edit_text1"),
-        types.InlineKeyboardButton(Hi[2], callback_data="edit_text2")
-    )
-    bot.send_message(message.chat.id, Hi[0], reply_markup=markup)
 
 #Здесь код для режима кнопок
 @bot.message_handler(func=lambda message: SOS[0] == "edit_text1")
@@ -390,7 +465,7 @@ def callback_task(call):
             SOS[1] = f"{i}"
             break
 
-    button2(call.message)      #СУПЕР НАДО ставь эту тему вроде для перехода
+    button2(call.message)      #СУПЕР НАО ставь эту тему вроде для перехода
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("t_button")) #ЭТО ПИШИ НА НЕТ
 def callback_task(call):
