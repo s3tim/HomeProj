@@ -117,7 +117,7 @@ def helpik(message):
     support_markup.add(
         types.InlineKeyboardButton(
             "Написать в поддержку",
-            url="https://t.me/helpikChell"
+            url="https://t.me/"
         )
     )
     bot.send_message(
