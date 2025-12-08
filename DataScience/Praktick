@@ -1,2 +1,2 @@
-#arr1 = np.array([1, 2, 3])
-print ("arr1")
+arr1 = np.array([1, 2, 3])
+print (arr1)
