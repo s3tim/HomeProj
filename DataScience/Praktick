@@ -1,2 +1,3 @@
-arr1 = np.array([1, 2, 3])
-print (arr1)
+import numpy as np
+variable = np.full((5, 2), True, dtype=bool)
+print(variable)
